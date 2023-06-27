@@ -285,6 +285,48 @@ class LdapShell(cmd.Cmd):
         else:
             log.info('Deleting computer with name "%s" result: OK', computer_name)
 
+    def do_add_group(self, line):
+        args = shlex.split(line)
+        if len(args) == 0:
+            raise Exception('A group is required.')
+
+        new_group = args[0]
+        description = None
+
+        if len(args) == 1:
+            parent_dn = f'CN=Users,{self.domain_dumper.root}'
+        else:
+            parent_dn = args[1]
+            if len(args) > 2:
+                description = args[2]
+
+        self.client.search(self.domain_dumper.root, f'(&(|(|(objectClass=group)(objectClass=groupOfNames))(objectClass=groupOfUniqueNames))(sAMAccountName={escape_filter_chars(new_group)}))', attributes=['objectSid'])
+        if len(self.client.entries) != 0:
+            raise Exception(f'Failed add group: group {new_group} already exists!')
+
+        new_group_dn = f'CN={new_group},{parent_dn}'
+
+        attrs = {
+            'cn': new_group,
+            'groupType': '-2147483644',
+            'sAMAccountName': new_group
+        }
+
+        if description is not None:
+            attrs['description'] = description
+
+        log.info('Attempting to create group in: %s', parent_dn)
+        res = self.client.add(new_group_dn, ['top', 'group'], attrs)
+        if not res:
+            if self.client.result['result'] == RESULT_UNWILLING_TO_PERFORM and not self.client.server.ssl:
+                raise Exception(
+                    'Failed to add a new group. The server denied the operation.'
+                    ' Try relaying to LDAP with TLS enabled (ldaps) or escalating an existing user.')
+            else:
+                raise Exception(f'Failed to add a new group: {self.client.result["description"]}')
+        else:
+            log.info('Adding new group %s result: OK', new_group)
+
     def do_add_user(self, line):
         if not self.client.server.ssl:
             return log.error('Error adding a new computer with LDAP requires LDAPS. Try -use-ldaps flag')
@@ -361,7 +403,7 @@ class LdapShell(cmd.Cmd):
             return
 
         user_name = args[0]
-        user_dn = self.get_dn(user_name)
+        user_dn = self.get_dn(user_name, allowed_classes=['user', 'person', 'organizationalPerson'])
         if not user_dn:
             raise Exception(f'User not found in LDAP: {user_name}')
 
@@ -371,7 +413,26 @@ class LdapShell(cmd.Cmd):
         if res:
             log.info('Delete user "%s" result: OK', user_name)
         else:
-            raise Exception(f'Failed to delete user: {self.client.result["description"]}')
+            raise Exception(f'Failed to delete user {user_name}: {self.client.result["description"]}')
+
+    def do_del_group(self, line):
+        args = shlex.split(line)
+        if len(args) < 1:
+            log.error("Enter the group to be deleted.")
+            return
+
+        group_name = args[0]
+        group_dn = self.get_dn(group_name, allowed_classes=['group', 'groupOfNames', 'groupOfUniqueNames'])
+        if not group_dn:
+            raise Exception(f'Group not found in LDAP: {group_name}')
+
+        group_name = group_dn.split(',')[0][3:]
+
+        res = self.client.delete(group_dn)
+        if res:
+            log.info('Delete group "%s" result: OK', group_dn)
+        else:
+            raise Exception(f'Failed to delete group {group_name}: {self.client.result["description"]}')
 
     def do_del_user_from_group(self, line):
         user_name, group_name = shlex.split(line)
@@ -392,7 +453,6 @@ class LdapShell(cmd.Cmd):
             log.info('Delete user "%s" from group "%s" result: OK', user_name, group_name)
         else:
             raise Exception(f'Failed to delete user from group "{group_name}": {self.client.result["description"]}')
-
 
     def do_change_password(self, line):
         if not self.client.server.ssl:
@@ -1157,12 +1217,19 @@ class LdapShell(cmd.Cmd):
         else:
             print('It seems you are already connected through a TLS channel.')
 
-    def get_dn(self, sam_name):
+    def get_dn(self, sam_name, allowed_classes=None):
         if ',' in sam_name:
             return sam_name
 
         try:
-            self.client.search(self.domain_dumper.root, f'(sAMAccountName={escape_filter_chars(sam_name)})',
+            ldap_query = f'(sAMAccountName={escape_filter_chars(sam_name)})'
+            if allowed_classes is not None and len(allowed_classes) > 0:
+                allowed_classes_clause = f'(objectClass={allowed_classes[0]})'
+                for allowed_class in allowed_classes[1:]:
+                    allowed_classes_clause = f'(|(objectClass={allowed_class}){allowed_classes_clause})'
+                ldap_query = f'(&{allowed_classes_clause}{ldap_query})'
+
+            self.client.search(self.domain_dumper.root, ldap_query,
                                attributes=['objectSid'])
             return self.client.entries[0].entry_dn
         except IndexError:
@@ -1198,6 +1265,8 @@ Misc
     switch_user user password/NTLM - Switch user shell.
     add_computer computer [password] - Adds a new computer to the domain with the specified password. Requires LDAPS.
     del_computer computer - Remove a new computer from the domain.
+    add_group group [parent] [description] - Creates a new group.
+    del_group group - Deletes an existing group.
     add_user new_user [parent] - Creates a new user.
     del_user user - Deletes an existing user.
     disable_account user - Disable the user's account.

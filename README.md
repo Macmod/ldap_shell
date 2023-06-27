@@ -20,6 +20,7 @@ ldap_shell domain.local/user -hashes aad3b435b51404eeaad3b435b51404ee:aad3b435b5
 export KRB5CCNAME=/home/user/ticket.ccache
 ldap_shell -k -no-pass domain.local/user
 ```
+
 ### Functionality
 ```
 Get Info
@@ -47,6 +48,8 @@ Misc
     switch_user user password/NTLM - Switch user shell.
     add_computer computer [password] - Adds a new computer to the domain with the specified password. Requires LDAPS.
     del_computer computer - Remove a computer from the domain.
+    add_group group [parent] [description] - Creates a new group.
+    del_group group - Deletes an existing group.
     add_user new_user [parent] - Creates a new user.
     del_user user - Deletes an existing user.
     disable_account user - Disable the user's account.
@@ -62,6 +65,8 @@ exit - Terminates this session.
 - [x] get_all_laps - Get all LAPS passwords
 - [x] set_owner - Abuse WriteOwner privilege
 - [x] dacl_modify - Set GenericAll, WriteDacl, WriteProperties or set MASK of privilege
+- [x] add_group - Adds a new group
+- [x] del_group - Deletes an existing group
 
 ## License
 Apache
